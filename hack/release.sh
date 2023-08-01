@@ -29,12 +29,27 @@ readonly YTT_CHECKSUM=aa7074d08dc35e588ab0e014f53e98aec0cfed6c3babf8a953c4225007
 
 main() {
         readonly RELEASE_VERSION=${RELEASE_VERSION:-"v0.0.0-dev"}
+        readonly RELEASE_IMAGE=${RELEASE_IMAGE:-$REGISTRY/cartographer:$RELEASE_VERSION}
         readonly PREVIOUS_VERSION=${PREVIOUS_VERSION:-$(git_previous_version $RELEASE_VERSION)}
+
+        readonly RELEASE_USING_LEVER=${RELEASE_USING_LEVER:-false}
+        readonly LEVER_KUBECONFIG_PATH=${LEVER_KUBECONFIG_PATH:-""}
+        readonly LEVER_COMMIT_SHA=${LEVER_COMMIT_SHA:-"$(git rev-parse HEAD)"}
 
         show_vars
         cd $ROOT
 
-        download_ytt_to_kodata
+        if [[ $RELEASE_USING_LEVER == true ]]; then
+                if [[ -z $LEVER_KUBECONFIG_PATH ]]; then
+                        echo "LEVER_KUBECONFIG_PATH must be set when RELEASE_USING_LEVER is true"
+                        exit 1
+                fi
+                echo "Building using lever"
+                lever_build_request
+        else
+                echo "Building locally"
+                build_image
+        fi
         generate_release
         create_release_notes
 }
@@ -45,29 +60,26 @@ show_vars() {
         REGISTRY:               $REGISTRY
         RELEASE_DATE:           $RELEASE_DATE
         RELEASE_VERSION:        $RELEASE_VERSION
+        RELEASE_IMAGE:          $RELEASE_IMAGE
         ROOT:                   $ROOT
         SCRATCH:                $SCRATCH
         YTT_VERSION:            $YTT_VERSION
+        RELEASE_USING_LEVER:    $RELEASE_USING_LEVER
+        LEVER_KUBECONFIG_PATH:  $LEVER_KUBECONFIG_PATH
+        LEVER_COMMIT_SHA:       $LEVER_COMMIT_SHA
         "
 }
 
-download_ytt_to_kodata() {
-        local url=https://github.com/vmware-tanzu/carvel-ytt/releases/download/v${YTT_VERSION}/ytt-linux-amd64
-        local fname=ytt-linux-amd64
+lever_build_request() {
+        ytt --ignore-unknown-comments -f ./hack/lever_build_request.yaml \
+                --data-value commit_sha=$LEVER_COMMIT_SHA \
+                --data-value release_image=$RELEASE_IMAGE \
+                | kubectl --kubeconfig $LEVER_KUBECONFIG_PATH apply -f -
+}
 
-        local dest
-        dest=$(realpath ./cmd/cartographer/kodata/$fname)
-
-        test -x $dest && echo "${YTT_CHECKSUM}  $dest" | sha256sum -c && {
-                echo "ytt already found in kodata."
-                return
-        }
-
-        pushd "$(mktemp -d)"
-        curl -sSOL $url
-        echo "${YTT_CHECKSUM}  $fname" | sha256sum -c
-        install -m 0755 $fname $dest
-        popd
+build_image() {
+        docker build ../.. -t $RELEASE_IMAGE
+        docker push $RELEASE_IMAGE
 }
 
 generate_release() {
@@ -75,9 +87,8 @@ generate_release() {
         ytt --ignore-unknown-comments -f ./config \
                 -f ./hack/overlays/webhook-configuration.yaml \
                 -f ./hack/overlays/component-labels.yaml \
-                --data-value version=$RELEASE_VERSION |
-                KO_DOCKER_REPO=$REGISTRY ko resolve -B -f- > \
-                        ./release/cartographer.yaml
+                --data-value version=$RELEASE_VERSION \
+                --data-value controller_image=$RELEASE_IMAGE > ./release/cartographer.yaml
 }
 
 create_release_notes() {
