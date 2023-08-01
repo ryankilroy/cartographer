@@ -17,7 +17,7 @@
 apiVersion: supplychain.cc.build/v1alpha2
 kind: Request
 metadata:
-  name: #@ "cartographer-" + data.values.commit_sha[0:6]
+  name: #@ "cartographer-" + data.values.build_suffix
   namespace: default
 spec:
   artifacts:
@@ -32,4 +32,4 @@ spec:
       ref:
         commit: #@ data.values.commit_sha
         branch: unused
-      url: https://gitlab.eng.vmware.com/vmware-tanzu/cartographer.git
+      url: https://github.com/ryankilroy/cartographer.git

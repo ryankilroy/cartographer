@@ -40,6 +40,10 @@ main() {
         cd $ROOT
 
         if [[ $RELEASE_USING_LEVER == true ]]; then
+                if [[ $REGISTRY == "192.168."* ]]; then
+                        echo "REGISTRY must be set to a registry accessible by lever when RELEASE_USING_LEVER is true"
+                        exit 1
+                fi
                 if [[ -z $LEVER_KUBECONFIG_PATH ]]; then
                         echo "LEVER_KUBECONFIG_PATH must be set when RELEASE_USING_LEVER is true"
                         exit 1
@@ -71,10 +75,12 @@ show_vars() {
 }
 
 lever_build_request() {
+        readonly BUILD_SUFFIX="$(git rev-parse HEAD | head -c 6)-$(echo $RANDOM | shasum | head -c 6; echo)"
         ytt --ignore-unknown-comments -f ./hack/lever_build_request.yaml \
-                --data-value commit_sha=$LEVER_COMMIT_SHA \
-                --data-value release_image=$RELEASE_IMAGE \
-                | kubectl --kubeconfig $LEVER_KUBECONFIG_PATH apply -f -
+        --data-value build_suffix=$BUILD_SUFFIX \
+        --data-value commit_sha=$LEVER_COMMIT_SHA \
+        --data-value release_image=$RELEASE_IMAGE \
+        | kubectl --kubeconfig $LEVER_KUBECONFIG_PATH apply -f -
 }
 
 build_image() {

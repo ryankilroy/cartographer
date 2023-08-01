@@ -1,4 +1,5 @@
-ARG BASE_IMAGE=ubuntu:jammy
+ARG BASE_IMAGE=harbor-repo.vmware.com/dockerhub-proxy-cache/library/ubuntu:jammy
+
 
 FROM $BASE_IMAGE AS base
 
