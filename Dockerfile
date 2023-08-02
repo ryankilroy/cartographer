@@ -1,7 +1,7 @@
 ARG BASE_IMAGE=harbor-repo.vmware.com/dockerhub-proxy-cache/library/ubuntu:jammy
+ARG GOLANG_IMAGE=harbor-repo.vmware.com/dockerhub-proxy-cache/library/golang:1.19
 
-
-FROM $BASE_IMAGE AS base
+FROM ${BASE_IMAGE} AS base
 
 RUN set -x && \
 	apt-get update && \
@@ -21,7 +21,7 @@ RUN set -eux && \
 	echo "${ytt_CHECKSUM}  /usr/local/bin/ytt" | sha256sum -c && \
 	chmod +x /usr/local/bin/ytt
 
-FROM golang:1.19 AS cartographer
+FROM ${GOLANG_IMAGE} AS cartographer
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

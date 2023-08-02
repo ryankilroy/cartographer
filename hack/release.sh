@@ -81,6 +81,36 @@ lever_build_request() {
         --data-value commit_sha=$LEVER_COMMIT_SHA \
         --data-value release_image=$RELEASE_IMAGE \
         | kubectl --kubeconfig $LEVER_KUBECONFIG_PATH apply -f -
+        wait_for_lever_build "cartographer-$BUILD_SUFFIX"
+}
+
+wait_for_lever_build() {
+        local build_name=$1
+        local components_status="-- "
+        local build_status="-- "
+        local ready_status="-- "
+
+        while [[ $ready_status != 'False' && $ready_status != 'True' ]]; do
+                conditions_length=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions}' | jq 'length')
+                components_status=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions[0].status}')
+                if [[ $conditions_length -gt 1 ]]; then
+                        build_status=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions[1].status}')
+                fi
+                if [[ $conditions_length -gt 2 ]]; then
+                        ready_status=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions[2].status}')
+                fi
+                echo "Waiting for lever build $build_name to complete. ComponentsReady: $components_status; BuildReady: $build_status; Ready: $ready_status"
+                sleep 5
+        done
+
+        if [[ $ready_status == 'False' ]]; then
+                echo "Lever build $build_name failed"
+                ready_message=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions[2].status}')
+                echo "Error: $ready_message"
+                exit 1
+        else
+                echo "Lever build $build_name succeeded"
+        fi
 }
 
 build_image() {
