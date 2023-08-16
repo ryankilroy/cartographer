@@ -30,6 +30,6 @@ spec:
   source:
     git:
       ref:
-        commit: #@ data.values.commit_sha
+        commit: #@ data.values.commit_ref
         branch: unused
       url: https://github.com/ryankilroy/cartographer.git

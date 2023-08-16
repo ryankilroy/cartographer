@@ -33,8 +33,7 @@ main() {
         readonly PREVIOUS_VERSION=${PREVIOUS_VERSION:-$(git_previous_version $RELEASE_VERSION)}
 
         readonly RELEASE_USING_LEVER=${RELEASE_USING_LEVER:-false}
-        readonly LEVER_KUBECONFIG_PATH=${LEVER_KUBECONFIG_PATH:-""}
-        readonly LEVER_COMMIT_SHA=${LEVER_COMMIT_SHA:-"$(git rev-parse HEAD)"}
+        readonly LEVER_COMMIT_REF=${LEVER_COMMIT_REF:-"$(git rev-parse HEAD)"}
 
         show_vars
         cd $ROOT
@@ -44,8 +43,8 @@ main() {
                         echo "REGISTRY must be set to a registry accessible by lever when RELEASE_USING_LEVER is true"
                         exit 1
                 fi
-                if [[ -z $LEVER_KUBECONFIG_PATH ]]; then
-                        echo "LEVER_KUBECONFIG_PATH must be set when RELEASE_USING_LEVER is true"
+                if [[ -z $LEVER_KUBECONFIG ]]; then
+                        echo "LEVER_KUBECONFIG must be set when RELEASE_USING_LEVER is true"
                         exit 1
                 fi
                 echo "Building using lever"
@@ -69,8 +68,8 @@ show_vars() {
         SCRATCH:                $SCRATCH
         YTT_VERSION:            $YTT_VERSION
         RELEASE_USING_LEVER:    $RELEASE_USING_LEVER
-        LEVER_KUBECONFIG_PATH:  $LEVER_KUBECONFIG_PATH
-        LEVER_COMMIT_SHA:       $LEVER_COMMIT_SHA
+        LEVER_KUBECONFIG:       $LEVER_KUBECONFIG
+        LEVER_COMMIT_REF:       $LEVER_COMMIT_REF
         "
 }
 
@@ -78,38 +77,47 @@ lever_build_request() {
         readonly BUILD_SUFFIX="$(git rev-parse HEAD | head -c 6)-$(echo $RANDOM | shasum | head -c 6; echo)"
         ytt --ignore-unknown-comments -f ./hack/lever_build_request.yaml \
         --data-value build_suffix=$BUILD_SUFFIX \
-        --data-value commit_sha=$LEVER_COMMIT_SHA \
+        --data-value commit_ref=$LEVER_COMMIT_REF \
         --data-value release_image=$RELEASE_IMAGE \
-        | kubectl --kubeconfig $LEVER_KUBECONFIG_PATH apply -f -
+        | kubectl --kubeconfig <(printf "${LEVER_KUBECONFIG}") apply -f -
         wait_for_lever_build "cartographer-$BUILD_SUFFIX"
 }
 
 wait_for_lever_build() {
         local build_name=$1
+        local conditions_json=""
         local components_status="-- "
         local build_status="-- "
+        local srp_status="-- "
         local ready_status="-- "
 
+        local counter=1
+
+        echo "Waiting for lever build $build_name to complete..."
         while [[ $ready_status != 'False' && $ready_status != 'True' ]]; do
-                conditions_length=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions}' | jq 'length')
-                components_status=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions[0].status}')
-                if [[ $conditions_length -gt 1 ]]; then
-                        build_status=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions[1].status}')
+                conditions_json=$(kubectl --kubeconfig <(printf "${LEVER_KUBECONFIG}") get request/$build_name -o jsonpath='{.status.conditions}')
+                components_status=$(echo $conditions_json | jq -r 'map(select(.type == "ComponentsReady"))[0].status')
+                build_status=$(echo $conditions_json | jq -r 'map(select(.type == "BuildReady"))[0].status')
+                srp_status=$(echo $conditions_json | jq -r 'map(select(.type == "SRPResourceSubmitted"))[0].status')
+                ready_status=$(echo $conditions_json | jq -r 'map(select(.type == "Ready"))[0].status')
+                loading_char=$(printf "%${counter}s")
+                printf "ComponentsReady: $components_status; BuildReady: $build_status; SRPResourceSubmitted: $srp_status; Ready: $ready_status; ${loading_char// /.}\033[0K\r"
+                counter=$((counter + 1))
+                if [[ $counter -gt 3 ]]; then
+                        counter=1
                 fi
-                if [[ $conditions_length -gt 2 ]]; then
-                        ready_status=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions[2].status}')
-                fi
-                echo "Waiting for lever build $build_name to complete. ComponentsReady: $components_status; BuildReady: $build_status; Ready: $ready_status"
-                sleep 5
+                sleep 2
         done
 
         if [[ $ready_status == 'False' ]]; then
                 echo "Lever build $build_name failed"
-                ready_message=$(kubectl --kubeconfig $LEVER_KUBECONFIG_PATH get request/$build_name -o jsonpath='{.status.conditions[2].status}')
+                ready_message=$(echo $conditions_json | jq 'map(select(.type == "Ready"))[0].message')
                 echo "Error: $ready_message"
                 exit 1
         else
-                echo "Lever build $build_name succeeded"
+                echo "Lever build $build_name succeeded. Image published:"
+                kubectl --kubeconfig <(printf "${LEVER_KUBECONFIG}") get request/$build_name -o jsonpath='{.status.artifactStatus.images[0].name}'
+                kubectl --kubeconfig <(printf "${LEVER_KUBECONFIG}") get request/$build_name -o jsonpath='{.status.artifactStatus.images[0].image.tag}'
         fi
 }
 
