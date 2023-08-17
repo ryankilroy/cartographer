@@ -117,6 +117,7 @@ wait_for_lever_build() {
         else
                 echo "Lever build $build_name succeeded. Image published:"
                 kubectl --kubeconfig <(printf "${LEVER_KUBECONFIG}") get request/$build_name -o jsonpath='{.status.artifactStatus.images[0].name}'
+                echo ""
                 kubectl --kubeconfig <(printf "${LEVER_KUBECONFIG}") get request/$build_name -o jsonpath='{.status.artifactStatus.images[0].image.tag}'
         fi
 }
